@@ -9,17 +9,17 @@ class SNESSystem: ObservableObject {
     @Published var cartridgeLoaded: Bool = false
     @Published var isTurbo: Bool = false
     @Published var isRunning: Bool = false
-    
+
     var ppu: PPU
     var apu: APU
     var dsp: DSP
     var bus: Bus
     var renderer: MetalRenderer
     var audioDriver: AudioDriver
-    
+
     private var timer: Timer?
     var currentInput: UInt16 = 0
-    
+
     init() {
         self.renderer = MetalRenderer()
         self.ppu = PPU(renderer: renderer)
@@ -28,19 +28,19 @@ class SNESSystem: ObservableObject {
         self.bus = Bus(ppu: ppu, apu: apu)
         self.cpu = CPU(bus: bus)
         self.audioDriver = AudioDriver()
-        
+
         self.bus.dmaController.system = self
         self.bus.system = self
-        
+
         setupControllerObserver()
     }
-    
+
     func saveState(to url: URL) {
         let s = Serializer()
         cpu.save(s); ppu.save(s); apu.save(s); dsp.save(s); bus.save(s)
         do { try s.data.write(to: url); statusMessage = "State Saved" } catch { print(error) }
     }
-    
+
     func loadState(from url: URL) {
         do {
             let data = try Data(contentsOf: url); let s = Serializer(data: data)
@@ -48,7 +48,7 @@ class SNESSystem: ObservableObject {
             statusMessage = "State Loaded"
         } catch { print(error) }
     }
-    
+
     func setupControllerObserver() {
         NotificationCenter.default.addObserver(self, selector: #selector(controllerDidConnect), name: .GCControllerDidConnect, object: nil)
     }
@@ -72,23 +72,23 @@ class SNESSystem: ObservableObject {
         if gamepad.leftShoulder.isPressed { input |= 0x0020 }
         if gamepad.rightShoulder.isPressed { input |= 0x0010 }
         currentInput = input
-        
+
         if gamepad.rightTrigger.isPressed && !isTurbo { toggleTurbo(true) }
         else if !gamepad.rightTrigger.isPressed && isTurbo { toggleTurbo(false) }
     }
-    
+
     func toggleTurbo(_ on: Bool) {
         isTurbo = on
         if isRunning { updateTimer() }
     }
-    
+
     func toggleLogging(_ on: Bool) {
         cpu.enableLogging = on
         statusMessage = on ? "CPU Logging: ON" : "CPU Logging: OFF"
     }
-    
+
     func runVideoTest() {
-        // Stop normal emulation so the test pattern stays visible.
+
         stopEmulation()
         ppu.drawTestPattern()
         ppu.renderer.updateTexture(pixels: ppu.frameBuffer)
@@ -116,105 +116,87 @@ class SNESSystem: ObservableObject {
         statusMessage = "Grid Test Pattern"
     }
 
-    
     func runAudioTest() {
         audioDriver.playTestTone()
         audioDriver.start()
         statusMessage = "Playing 440Hz Test Tone..."
     }
-    
+
     func loadRom(data: Data) {
         let cartridge = Cartridge(data: data)
         bus.insertCartridge(cartridge)
-        
+
         cpu.reset()
         ppu.reset()
         apu.reset()
         cartridgeLoaded = true
         statusMessage = "Loaded: \(data.count / 1024)KB"
-        
+
         audioDriver.start()
         startEmulation()
         objectWillChange.send()
     }
-    
+
     func saveSRAM() { if let cart = bus.cartridge, let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first { cart.saveSRAM(to: docDir.appendingPathComponent("saved_game.srm")); statusMessage = "Saved SRAM" } }
     func loadSRAM() { if let cart = bus.cartridge, let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first { cart.loadSRAM(from: docDir.appendingPathComponent("saved_game.srm")); statusMessage = "Loaded SRAM" } }
-    
+
     func startEmulation() {
         isRunning = true
         updateTimer()
     }
-    
+
     func stopEmulation() {
         isRunning = false
         timer?.invalidate()
         timer = nil
     }
-    
+
     private func updateTimer() {
         timer?.invalidate()
         let interval = isTurbo ? 0.002 : 0.016
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in self.frame() }
     }
-    
-    
+
     func frame() {
         guard cartridgeLoaded else { return }
 
-        // Start-of-frame HDMA setup
         bus.dmaController.resetHDMA(bus: bus)
 
-        // NTSC Total scanlines = 262 (Lines 0 through 261).
         let totalScanlines = 262
         let cpuCyclesPerScanline = 1364
 
-        // Loop over all 262 scanlines of the frame.
         for line in 0..<totalScanlines {
 
-            // --- 1. IRQ/NMI Check (for the line the CPU is about to execute) ---
-            
-            // Check the NMI Status flag in the Bus, which is set by PPU.stepScanline()
-            // when VBLANK starts. NMI is level-triggered and should be checked frequently.
             if (bus.nmiStatus & 0x80) != 0 {
                 cpu.nmi()
             }
 
-            // H/V IRQ evaluation
             if bus.irqEnabled {
-                // The V-Counter is ppu.currentScanline (set by the PPU)
-                let hPos: UInt16 = 170 // Approximate cycle count for H-IRQ
+
+                let hPos: UInt16 = 170
                 if bus.checkIRQ(vCounter: ppu.currentScanline, hCounter: hPos) {
                     cpu.irq()
                 }
             }
 
-            // HDMA is executed per-scanline.
             bus.dmaController.executeHDMA(line: line, bus: bus)
 
-
-            // --- 2. Clock CPU/APU for one scanline's worth of cycles (approx 1364) ---
             var cycles = 0
             while cycles < cpuCyclesPerScanline {
                 let prevCyclesRemaining = cpu.cyclesRemaining
 
-                // One CPU cycle (or substep)
                 cpu.clock()
 
-                // Keep APU in lockstep.
                 apu.clock()
 
-                // Drive the DSP mixer (approx 32kHz, which is ~112 CPU cycles).
                 if (cycles % 120) == 0 {
                     dsp.mix()
                 }
 
-                // Run SuperFX if active
                 if bus.gsu.isRunning {
                     bus.gsu.step()
                 }
 
-                // Roughly account for how many CPU cycles were consumed.
                 if cpu.cyclesRemaining > prevCyclesRemaining {
                     cycles += (prevCyclesRemaining + 2)
                 } else if cpu.cyclesRemaining == 0 {
@@ -223,14 +205,10 @@ class SNESSystem: ObservableObject {
                     cycles += 1
                 }
             }
-            
-            // --- 3. Step PPU to the next line (handles rendering, VBLANK, NMI signaling) ---
-            // This call renders the current line and increments the internal scanline counter.
-            // It also signals VBLANK and NMI (via the Bus) when line 225 is reached.
+
             ppu.stepScanline()
         }
 
-        // --- 4. End of Frame Audio Flush ---
         let samples = dsp.flushBuffer()
         if !samples.isEmpty {
             audioDriver.queueSamples(samples)
@@ -242,14 +220,14 @@ func step() {
         apu.clock()
         objectWillChange.send()
     }
-    
+
     func reset() {
         cpu.reset()
         ppu.reset()
         apu.reset()
         objectWillChange.send()
     }
-    
+
     func handleKey(code: UInt16, isDown: Bool) {
         let mask: UInt16
         switch code {

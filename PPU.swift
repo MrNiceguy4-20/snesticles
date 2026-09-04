@@ -3,8 +3,7 @@ import Foundation
 class PPU {
     var nmiFlag: Bool = false
     var vblankFlag: Bool = false
-    
-    // NEW: Reference back to the Bus (set by Bus.swift on init)
+
     weak var bus: Bus?
 
     unowned let renderer: MetalRenderer
@@ -24,14 +23,14 @@ class PPU {
     let maxWidth = 512; let maxHeight = 478
     struct Pixel { var color: UInt16; var priority: Int; var layer: Int; var hasPixel: Bool }
     var mainBuf: [Pixel]; var subBuf: [Pixel]
-    
+
     init(renderer: MetalRenderer) {
         self.renderer = renderer
         self.frameBuffer = Array(repeating: 0xFF000000, count: maxWidth * maxHeight)
         self.mainBuf = Array(repeating: Pixel(color: 0, priority: 0, layer: 0, hasPixel: false), count: maxWidth)
         self.subBuf = Array(repeating: Pixel(color: 0, priority: 0, layer: 0, hasPixel: false), count: maxWidth)
     }
-    
+
     func save(_ s: Serializer) {
         s.writeBytes(vram)
         for c in cgram { s.write16(c) }
@@ -47,7 +46,7 @@ class PPU {
         s.write8(win1L); s.write8(win1R); s.write8(tm); s.write8(ts)
         s.write8(cgwsel); s.write8(cgadsub); s.write16(fixedColor)
     }
-    
+
     func load(_ s: Serializer) {
         vram = s.readBytes(64 * 1024)
         for i in 0..<256 { cgram[i] = s.read16() }
@@ -63,30 +62,30 @@ class PPU {
         win1L = s.read8(); win1R = s.read8(); tm = s.read8(); ts = s.read8()
         cgwsel = s.read8(); cgadsub = s.read8(); fixedColor = s.read16()
     }
-    
+
     func reset() {
         vram = Array(repeating: 0, count: 64 * 1024); cgram = Array(repeating: 0, count: 256); oam = Array(repeating: 0, count: 544)
         vramAddr = 0; ppuLatch = 0; bg1HOFS = 0; bg1VOFS = 0; bg2HOFS = 0; bg2VOFS = 0
         m7a = 0; m7b = 0; m7c = 0; m7d = 0; m7x = 0; m7y = 0; mosaic = 0; forceBlank = false
     }
-    
+
     func readRegister(_ offset: UInt32) -> UInt8 {
         switch offset {
         case 0x2137:
-            // Latch H/V counters (not fully emulated yet)
+
             return 0
         case 0x213F:
-            // Simple PPU status: indicate NTSC and no interlace
+
             return 0x20
         default:
             return 0
         }
     }
-    
+
     func writeRegister(_ offset: UInt32, data: UInt8) {
         switch offset {
         case 0x2100:
-            // INIDISP: bit7 = force blank, low 4 bits = brightness
+
             brightness = data & 0x0F
             forceBlank = (data & 0x80) != 0
         case 0x2101: objSEL = data
@@ -128,14 +127,12 @@ class PPU {
         default: break
         }
     }
-    
-    // NEW: Function to advance the PPU by one scanline
-    func stepScanline() {
-        // NTSC PPU timing constants (0-indexed)
-        let VBLANK_START_LINE: UInt16 = 225 // Line 225 begins VBLANK (visible lines are 0-224)
-        let LAST_SCANLINE: UInt16 = 261   // Line 261 is the last line of the frame
 
-        // Render the current line. Only render visible lines (0-224)
+    func stepScanline() {
+
+        let VBLANK_START_LINE: UInt16 = 225
+        let LAST_SCANLINE: UInt16 = 261
+
         if currentScanline < VBLANK_START_LINE {
             renderScanline(line: Int(currentScanline))
         }
@@ -143,27 +140,26 @@ class PPU {
         currentScanline += 1
 
         if currentScanline == VBLANK_START_LINE {
-            // VBLANK starts: Set NMI flag on the Bus if NMI is enabled ($4200 bit 7)
+
             if nmiEnabled, let bus = bus {
-                // Assuming Bus has a setNmiFlag() method
+
                 bus.setNmiFlag()
             }
         }
 
         if currentScanline > LAST_SCANLINE {
-            // End of frame, reset to line 0 (pre-render line)
+
             currentScanline = 0
-            // Tell the renderer to display the finished frame
+
             renderer.updateTexture(pixels: frameBuffer)
         }
     }
-    
-    
+
     private func windowAllowsPixel(layerID: Int, x: Int) -> Bool {
-        // Simple window 1 handling: if cgwsel bit1 is set, treat win1L..win1R as a masked region.
+
         if (cgwsel & 0x02) == 0 { return true }
         if x >= Int(win1L) && x <= Int(win1R) {
-            // Mask this layer in the window range
+
             return false
         }
         return true
@@ -173,17 +169,17 @@ class PPU {
         if addr < vram.count { vram[addr] = val }
         if high { vramAddr = vramAddr &+ UInt16(vramIncSize) }
     }
-    
+
     private var cgramLatch: UInt8 = 0; private var cgramFlip: Bool = false
     private func writeCGRAM(val: UInt8) {
         if !cgramFlip { cgramLatch = val; cgramFlip = true }
         else { let color = (UInt16(val) << 8) | UInt16(cgramLatch); cgram[Int(cgramAddr)] = color; cgramAddr = cgramAddr &+ 1; cgramFlip = false }
     }
-    
+
     func renderScanline(line: Int) {
         if line >= maxHeight { return }
         let isHiRes = (bgMode == 5 || bgMode == 6); let renderWidth = isHiRes ? 512 : 256
-        // If force blank is set or brightness is zero, output a black line and return early.
+
         if forceBlank || brightness == 0 {
             frameBuffer.withUnsafeMutableBufferPointer { fbPtr in
                 let base = line * maxWidth
@@ -222,7 +218,7 @@ class PPU {
                             finalColor = UInt16(r)|(UInt16(g)<<5)|(UInt16(b)<<10)
                         }
                         var r = Int(finalColor & 0x001F); var g = Int((finalColor & 0x03E0) >> 5); var b = Int((finalColor & 0x7C00) >> 10)
-                        // Apply simple brightness scaling using INIDISP low 4 bits (0-15)
+
                         let bright = Int(brightness)
                         r = (r * bright) / 15; g = (g * bright) / 15; b = (b * bright) / 15
                         if r < 0 { r = 0 } else if r > 31 { r = 31 }
@@ -237,7 +233,7 @@ class PPU {
             }
         }
     }
-    
+
     func renderMode7(line: Int) {
         if (tm & 0x01) == 0 { return }
         mainBuf.withUnsafeMutableBufferPointer { mainPtr in
@@ -250,7 +246,7 @@ class PPU {
             }
         }
     }
-    
+
     func renderLayerToBuffers(line: Int, sc: UInt8, nba: UInt8, hScroll: UInt16, vScroll: UInt16, layerID: Int, hiRes: Bool) {
         let enableMain = (tm & (1 << (layerID - 1))) != 0; let enableSub = (ts & (1 << (layerID - 1))) != 0
         if !enableMain && !enableSub { return }
@@ -295,7 +291,7 @@ class PPU {
             }
         }
     }
-    
+
     func renderSpritesToBuffers(line: Int, hiRes: Bool) {
         let enableMain = (tm & 0x10) != 0; let enableSub = (ts & 0x10) != 0
         if !enableMain && !enableSub { return }
@@ -319,7 +315,7 @@ class PPU {
                             let cIdx = ((b1 & mask) != 0 ? 1 : 0) + ((b2 & mask) != 0 ? 2 : 0) + ((b3 & mask) != 0 ? 4 : 0) + ((b4 & mask) != 0 ? 8 : 0)
                             if cIdx != 0 {
                                 let color = cgram[128 + Int(paletteIdx * 16) + cIdx]
-                                // Approximate sprite priority using OAM property bits 4-5.
+
                                 let spritePri = 80 + Int((oamProp & 0x30) >> 4) * 5
                                 if enableMain {
                                     let existing = mainPtr[drawX]
@@ -340,13 +336,13 @@ class PPU {
             }
         }
     }
-    
+
     private func convertColor(_ color: UInt16) -> UInt32 {
         let r = (color & 0x001F); let g = (color & 0x03E0) >> 5; let b = (color & 0x7C00) >> 10
         let R = UInt32((r * 255) / 31); let G = UInt32((g * 255) / 31); let B = UInt32((b * 255) / 31)
         return 0xFF000000 | (R << 16) | (G << 8) | B
     }
-    // --- Test Pattern Suite ---
+
     func drawTestPattern() {
         let visibleHeight = 224
         let visibleWidth  = 256
@@ -363,7 +359,7 @@ class PPU {
             }
         }
     }
-    
+
     func drawHiresTestPattern() {
         let h=224, w=512
         frameBuffer.withUnsafeMutableBufferPointer { fbPtr in
@@ -377,7 +373,7 @@ class PPU {
             }
         }
     }
-    
+
     func drawColorBarsTestPattern() {
         let h = 224, w = 256
         let bars: [UInt32] = [
@@ -385,7 +381,7 @@ class PPU {
             0xFF00FFFF, 0xFF0000FF, 0xFFFF00FF, 0xFFFFFFFF
         ]
         let bw = w / 7
-        
+
         frameBuffer.withUnsafeMutableBufferPointer { fbPtr in
             for y in 0..<h {
                 for i in 0..<7 {
@@ -399,11 +395,10 @@ class PPU {
             }
         }
     }
-    
-    
+
     func drawGridTestPattern() {
         let h = 224, w = 256
-        
+
         frameBuffer.withUnsafeMutableBufferPointer { fbPtr in
             for y in 0..<h {
                 for x in 0..<w {

@@ -13,8 +13,8 @@ class APU {
     var y: UInt8 = 0
     var sp: UInt8 = 0xEF
     var pc: UInt16 = 0xFFC0
-    // SPC700 PSW bits: N V 1 B D I Z C
-    var psw: UInt8 = 0x20 // Bit 5 is always set (0x20)
+
+    var psw: UInt8 = 0x20
     var cyclesRemaining: Int = 0
     var portOut = [UInt8](repeating: 0, count: 4)
     var portIn = [UInt8](repeating: 0, count: 4)
@@ -26,12 +26,10 @@ class APU {
     var dsp: DSP
     var ports: [UInt8] = [0, 0, 0, 0]
     var spcUploadAddr: UInt16 = 0
-    // Handshake toggle bits (CPU <-> SPC)
-    var cpuToSpcToggle: [UInt8] = [0, 0, 0, 0]   // CPU writes → set bit 7
-    var spcToCpuToggle: [UInt8] = [0, 0, 0, 0]   // SPC writes → set bit 6
 
-    
-    // Addressing modes for helper function
+    var cpuToSpcToggle: [UInt8] = [0, 0, 0, 0]
+    var spcToCpuToggle: [UInt8] = [0, 0, 0, 0]
+
     enum AddressingMode {
         case immediate
         case dp
@@ -40,22 +38,21 @@ class APU {
         case absolute
         case absoluteX
         case absoluteY
-        case indirectX // ($dp+X)
-        case indirectY // ($dp), Y
-        case indirectAbsX // ($aa+X)
-        case indirectAbs // ($aa)
-        case indirectZeroPage // (X)
-        case indirectDp // ($dp)
+        case indirectX
+        case indirectY
+        case indirectAbsX
+        case indirectAbs
+        case indirectZeroPage
+        case indirectDp
     }
-    
-    // Shift/Rotate modes
+
     enum ShiftRotateMode {
         case asl
         case lsr
         case rol
         case ror
     }
-    
+
     init(dsp: DSP) {
         self.dsp = dsp
         self.dsp.setAPU(self)
@@ -93,7 +90,7 @@ class APU {
         y = 0
         sp = 0xEF
         pc = 0xFFC0
-        psw = 0x20 // Bit 5 is always set
+        psw = 0x20
         portOut = [0, 0, 0, 0]
         portIn = [0, 0, 0, 0]
         timerEnabled = [false, false, false]
@@ -101,17 +98,14 @@ class APU {
         timerCounters = [0, 0, 0]
         timerOutputs = [0, 0, 0]
         timerDividers = [0, 0, 0]
-        spcUploadAddr = 0x0200   // ✅ HARD SET
+        spcUploadAddr = 0x0200
 
     }
     func write(_ port: Int, data: UInt8) {
         let p = port & 3
-        portIn[p] = data      // ✅ CORRECT
+        portIn[p] = data
 
-
-        // ✅ flip CPU->SPC toggle (bit 7)
         cpuToSpcToggle[p] ^= 0x80
-
 
         switch p {
         case 0:
@@ -138,15 +132,12 @@ class APU {
     func read(_ port: Int) -> UInt8 {
         let p = port & 3
 
-        // ✅ Data seen by CPU includes toggle
         let value = portOut[p] | spcToCpuToggle[p]
 
         print("CPU READ $214\(p) = \(String(format: "%02X", value))")
 
-        // ✅ But the DATA stored must return WITHOUT toggle
         return portOut[p]
     }
-
 
     func spcRead(_ addr: UInt16) -> UInt8 {
         if addr >= 0xFFC0 && (ram[0xF1] & 0x80) == 0 {
@@ -160,17 +151,14 @@ class APU {
 
         portOut[p] = value
 
-        // ✅ SPC toggles bit 6
         spcToCpuToggle[p] ^= 0x40
     }
 
-    
-    // Stack Operations
     func push(_ val: UInt8) {
         writeMem(0x0100 | UInt16(sp), data: val)
         sp &-= 1
     }
-    
+
     func pull() -> UInt8 {
         sp &+= 1
         return readMem(0x0100 | UInt16(sp))
@@ -186,13 +174,13 @@ class APU {
         case 0x00F3:
             return dsp.readData()
         case 0x00F4:
-            return portIn[0]   // NEW
+            return portIn[0]
         case 0x00F5:
-            return portIn[1]   // NEW
+            return portIn[1]
         case 0x00F6:
-            return portIn[2]   // NEW
+            return portIn[2]
         case 0x00F7:
-            return portIn[3]   // NEW
+            return portIn[3]
         case 0x00FD:
             let val = timerOutputs[0]
             timerOutputs[0] = 0
@@ -210,12 +198,11 @@ class APU {
         }
     }
 
-
     func writeMem(_ addr: UInt16, data: UInt8) {
         if addr >= 0xFFC0 && (ram[0xF1] & 0x80) == 0 {
             print(String(format: "✅ IPL READ %04X = %02X", addr, iplRom[Int(addr - 0xFFC0)]))
         }
-        
+
         ram[Int(addr)] = data
         switch addr {
         case 0x00F1:
@@ -245,10 +232,9 @@ class APU {
             timerEnabled[0] = t0
             timerEnabled[1] = t1
             timerEnabled[2] = t2
-            
-            // Clear or set bit 5 (always 1) on writing $F1
+
             psw = (psw & ~0x20) | 0x20
-            
+
         case 0x00F2:
             dsp.setIndex(data)
         case 0x00F3:
@@ -269,7 +255,6 @@ class APU {
             portOut[3] = data
             spcWriteToPort(3, data)
 
-            // ✅ Disable IPL only
             ram[0xF1] |= 0x80
 
             print("✅ SPC IPL DISABLED (NO FORCED JUMP)")
@@ -278,7 +263,7 @@ class APU {
             timerTargets[0] = data
         case 0x00FB:
             timerTargets[1] = data
-            
+
         case 0x00FC:
             timerTargets[2] = data
         default:
@@ -286,10 +271,9 @@ class APU {
         }
     }
 
-    // New 16-bit Read/Write Helpers
     func readMem16(_ addr: UInt16) -> UInt16 {
         let low = readMem(addr)
-        // SPC700 pointers wrap around the 256-byte page boundary (e.g., $FF -> $00)
+
         let high = readMem((addr & 0xFF00) | UInt16((addr & 0xFF) &+ 1))
         return UInt16(high) << 8 | UInt16(low)
     }
@@ -298,32 +282,27 @@ class APU {
         writeMem(addr, data: UInt8(data & 0xFF))
         writeMem((addr & 0xFF00) | UInt16((addr & 0xFF) &+ 1), data: UInt8(data >> 8))
     }
-    
+
     func pushPC() {
         push(UInt8(pc >> 8))
         push(UInt8(pc & 0xFF))
     }
-    
-    // Interrupt and BRK Handling
+
     func interrupt(vector: UInt16, isBRK: Bool) {
-        // Push PC (or PC+1 for BRK)
+
         let effectivePC = isBRK ? pc &+ 1 : pc
         push(UInt8(effectivePC >> 8))
         push(UInt8(effectivePC & 0xFF))
-        
-        // Push PSW (B flag is set for BRK, clear for others)
+
         let pswToPush = isBRK ? (psw | 0x08) : (psw & ~0x08)
         push(pswToPush)
-        
-        // Set Interrupt (I) flag
+
         psw |= 0x04
-        
-        // Load new PC from vector
+
         pc = readMem16(vector)
         cyclesRemaining = 8
     }
 
-    /// Execute one APU master cycle.
     func clock() {
         tickTimers()
         if cyclesRemaining > 0 {
@@ -343,8 +322,6 @@ class APU {
 
     }
 
-
-    /// Run the APU for a given number of abstract cycles.
     func run(cycles: Int) {
         guard cycles > 0 else { return }
         for _ in 0..<cycles {
@@ -368,8 +345,7 @@ class APU {
             }
         }
     }
-    
-    // Helper function for conditional branches
+
     func branch(_ condition: Bool) {
         let offset = Int8(bitPattern: readMem(pc))
         pc &+= 1
@@ -380,8 +356,7 @@ class APU {
             cyclesRemaining = 2
         }
     }
-    
-    // Helper function for CMP instruction
+
     func compare(register: UInt8, operand: UInt8) {
         let result = register &- operand
         if register >= operand {
@@ -391,13 +366,12 @@ class APU {
         }
         setZN(result)
     }
-    
-    // Helper to read operand and calculate addressing mode (simplified for brevity)
+
     func readOperand(mode: AddressingMode) -> (val: UInt8, addr: UInt16?, cycles: Int) {
         var addr: UInt16? = nil
         var cycles = 0
         var val: UInt8 = 0
-        
+
         switch mode {
         case .immediate: val = readMem(pc); pc &+= 1; cycles = 2
         case .dp: let dp = readMem(pc); pc &+= 1; addr = UInt16(dp); val = readMem(addr!); cycles = 3
@@ -416,11 +390,10 @@ class APU {
         return (val, addr, cycles)
     }
 
-    // Helper to write operand to memory address (simplified for brevity)
     func writeOperand(mode: AddressingMode, val: UInt8) -> Int {
         var addr: UInt16? = nil
         var cycles = 0
-        
+
         switch mode {
         case .dp: let dp = readMem(pc); pc &+= 1; addr = UInt16(dp); cycles = 4
         case .dpX: let dp = readMem(pc); pc &+= 1; addr = UInt16(dp &+ x) & 0xFF; cycles = 5
@@ -452,7 +425,7 @@ class APU {
             psw &= ~0x40
         }
     }
-    
+
     func adc(operand: UInt8) {
         let carry = psw & 0x01
         let sum = a &+ operand &+ carry
@@ -460,7 +433,7 @@ class APU {
         a = sum
         setZN(a)
     }
-    
+
     func sbc(operand: UInt8) {
         let carryBit = (psw & 0x01)
         let result = a &- operand &- (1 &- carryBit)
@@ -468,69 +441,69 @@ class APU {
         a = result
         setZN(a)
     }
-    
+
     func andLogic(operand: UInt8) { a = a & operand; setZN(a) }
     func orLogic(operand: UInt8) { a = a | operand; setZN(a) }
     func eorLogic(operand: UInt8) { a = a ^ operand; setZN(a) }
-    
+
     func incDecMem(addr: UInt16, increment: Bool) {
         var val = readMem(addr)
         if increment { val &+= 1 } else { val &-= 1 }
         writeMem(addr, data: val)
         setZN(val)
     }
-    
+
     func shiftRotate(addr: UInt16?, mode: ShiftRotateMode) {
         var val: UInt8
         if let addr = addr { val = readMem(addr) } else { val = a }
         let oldCarry = psw & 0x01
         var newCarry: UInt8 = 0
-        
+
         switch mode {
         case .asl: newCarry = (val & 0x80) >> 7; val = val << 1
         case .lsr: newCarry = val & 0x01; val = val >> 1
         case .rol: newCarry = (val & 0x80) >> 7; val = (val << 1) | oldCarry
         case .ror: newCarry = val & 0x01; val = (val >> 1) | (oldCarry << 7)
         }
-        
+
         if newCarry != 0 { psw |= 0x01 } else { psw &= ~0x01 }
         if let addr = addr { writeMem(addr, data: val) } else { a = val }
         setZN(val)
     }
-    
+
     func tsetTclr(addr: UInt16, mask: UInt8, set: Bool) {
         var val = readMem(addr)
         setZN(val & mask)
         if set { val = val | mask } else { val = val & ~mask }
         writeMem(addr, data: val)
     }
-    
+
     func bitBranch(opcode: UInt8, set: Bool) {
         let bit = (opcode & 0xF0) >> 4
         let dp = readMem(pc); pc &+= 1
         let offset = Int8(bitPattern: readMem(pc)); pc &+= 1
-        
+
         let addr = UInt16(dp)
         let val = readMem(addr)
         let bitIsSet = (val & (1 << bit)) != 0
         let condition = set ? bitIsSet : !bitIsSet
-        
+
         if condition { pc = pc &+ UInt16(bitPattern: Int16(offset)); cyclesRemaining = 8 } else { cyclesRemaining = 6 }
     }
-    
+
     func setClearBit(opcode: UInt8, set: Bool) {
         let bit = (opcode & 0xF0) >> 4
         let dp = readMem(pc); pc &+= 1
-        
+
         let addr = UInt16(dp)
         var val = readMem(addr)
         let mask: UInt8 = 1 << bit
-        
+
         if set { val |= mask } else { val &= ~mask }
         writeMem(addr, data: val)
         cyclesRemaining = 5
     }
-    
+
     func decimalAdjust(isDAA: Bool) {
         var a16 = UInt16(a); var carry = (psw & 0x01) != 0
         if (psw & 0x08) != 0 {
@@ -545,7 +518,7 @@ class APU {
         if carry { psw |= 0x01 } else { psw &= ~0x01 }
         a = UInt8(a16 & 0xFF); setZN(a); cyclesRemaining = 3
     }
-    
+
     func execute(_ opcode: UInt8) {
         switch opcode {
         case 0x00:
@@ -663,9 +636,7 @@ class APU {
             pc = pc &+ 1
             cyclesRemaining = 4
 
-            
-        // --- 16-Bit Word Moves (MOVW) ---
-        case 0xBF: // MOVW dp, dp
+        case 0xBF:
             let src = UInt16(readMem(pc))
             let dst = UInt16(readMem(pc &+ 1))
             pc &+= 2
@@ -692,51 +663,40 @@ class APU {
 
             cyclesRemaining = 5
 
-            
-        // --- Flag Manipulation (Fixed) ---
-        case 0x02: psw |= 0x01; cyclesRemaining = 2 // SETC
-        case 0x12: psw &= ~0x08; cyclesRemaining = 2 // CLRP
-        case 0x22: psw |= 0x40; cyclesRemaining = 2 // SETV
-        case 0x32: psw &= ~0x40; cyclesRemaining = 2 // CLRV
-        case 0x52: psw |= 0x04; cyclesRemaining = 2 // SET I
-        case 0x72: psw &= ~0x04; cyclesRemaining = 2 // CLRI
+        case 0x02: psw |= 0x01; cyclesRemaining = 2
+        case 0x12: psw &= ~0x08; cyclesRemaining = 2
+        case 0x22: psw |= 0x40; cyclesRemaining = 2
+        case 0x32: psw &= ~0x40; cyclesRemaining = 2
+        case 0x52: psw |= 0x04; cyclesRemaining = 2
+        case 0x72: psw &= ~0x04; cyclesRemaining = 2
 
-        // --- Bit Set/Clear (Fully Implemented) ---
-        case 0x0D, 0x1D, 0x2D, 0x3D: setClearBit(opcode: opcode, set: true) // SET0-3 $dp
-        case 0x4D, 0x5D, 0x6D, 0x7D: setClearBit(opcode: opcode, set: false) // CLR0-3 $dp
-            
-        // --- Bit Branch (BBC/BBS) ---
-        case 0x03, 0x13, 0x23, 0x33, 0x43, 0x53, 0x63, 0x73: bitBranch(opcode: opcode, set: false) // BBC0-7 $dp, $rel
-        case 0x83, 0x93, 0xA3, 0xB3, 0xC3, 0xD3, 0xE3, 0xF3: bitBranch(opcode: opcode, set: true) // BBS0-7 $dp, $rel
-            
-        // --- Transfer/Push/Pull (Canonicalized) ---
-        case 0x20: push(x); cyclesRemaining = 4 // PUSH X
-        case 0x40: push(y); cyclesRemaining = 4 // PUSH Y
-        case 0x5C: x = pull(); setZN(x); cyclesRemaining = 5 // PULL X
-        case 0x7C: y = pull(); setZN(y); cyclesRemaining = 5 // PULL Y
-        case 0x68: push(a); cyclesRemaining = 4 // PUSHA
-        case 0x28: a = pull(); setZN(a); cyclesRemaining = 5 // PULLA
-        
-        case 0xAE: psw = pull() | 0x20; cyclesRemaining = 5 // PULL PSW
-            
-        // --- Miscellaneous Ops ---
-        case 0x8A: a = (a >> 4) | (a << 4); setZN(a); cyclesRemaining = 2 // XCN A
-        case 0xF9: decimalAdjust(isDAA: true) // DAA
+        case 0x0D, 0x1D, 0x2D, 0x3D: setClearBit(opcode: opcode, set: true)
+        case 0x4D, 0x5D, 0x6D, 0x7D: setClearBit(opcode: opcode, set: false)
 
-        
-        
+        case 0x03, 0x13, 0x23, 0x33, 0x43, 0x53, 0x63, 0x73: bitBranch(opcode: opcode, set: false)
+        case 0x83, 0x93, 0xA3, 0xB3, 0xC3, 0xD3, 0xE3, 0xF3: bitBranch(opcode: opcode, set: true)
+
+        case 0x20: push(x); cyclesRemaining = 4
+        case 0x40: push(y); cyclesRemaining = 4
+        case 0x5C: x = pull(); setZN(x); cyclesRemaining = 5
+        case 0x7C: y = pull(); setZN(y); cyclesRemaining = 5
+        case 0x68: push(a); cyclesRemaining = 4
+        case 0x28: a = pull(); setZN(a); cyclesRemaining = 5
+
+        case 0xAE: psw = pull() | 0x20; cyclesRemaining = 5
+
+        case 0x8A: a = (a >> 4) | (a << 4); setZN(a); cyclesRemaining = 2
+        case 0xF9: decimalAdjust(isDAA: true)
+
         default:
-            // This huge block includes all other existing instructions (MOV, CMP, INC, DEC, Shift/Rotate, Branches, JMP, etc.)
-            // NOTE: Many opcodes are aliases, this switch must contain all 256.
-            if opcode == 0x1A { a &+= 1; setZN(a); cyclesRemaining = 2 } // INC A
-            else if opcode == 0x3A { x &+= 1; setZN(x); cyclesRemaining = 2 } // INC X
-            else if opcode == 0x9A { y &+= 1; setZN(y); cyclesRemaining = 2 } // INC Y
-            else if opcode == 0xEA { a &-= 1; setZN(a); cyclesRemaining = 2 } // DEC A
-            else if opcode == 0x9C { x &-= 1; setZN(x); cyclesRemaining = 2 } // DEC X
-            else if opcode == 0xCA { y &-= 1; setZN(y); cyclesRemaining = 2 } // DEC Y
-            // ... (rest of the 256-opcode logic should be here, keeping the complexity manageable)
-            
-            // Placeholder for remaining logic (In a complete core, all 256 opcodes are handled here)
+
+            if opcode == 0x1A { a &+= 1; setZN(a); cyclesRemaining = 2 }
+            else if opcode == 0x3A { x &+= 1; setZN(x); cyclesRemaining = 2 }
+            else if opcode == 0x9A { y &+= 1; setZN(y); cyclesRemaining = 2 }
+            else if opcode == 0xEA { a &-= 1; setZN(a); cyclesRemaining = 2 }
+            else if opcode == 0x9C { x &-= 1; setZN(x); cyclesRemaining = 2 }
+            else if opcode == 0xCA { y &-= 1; setZN(y); cyclesRemaining = 2 }
+
             cyclesRemaining = 2
         }
     }

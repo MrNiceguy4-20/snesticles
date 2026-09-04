@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var isImporting: Bool = false
     @State private var cheatCode: String = ""
     @State private var isLogging: Bool = false
-    
+
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
@@ -17,21 +17,21 @@ struct ContentView: View {
             }
             .frame(minWidth: 512, minHeight: 448)
             .background(KeyboardHandler(snes: snes))
-            
+
             VStack(alignment: .leading, spacing: 10) {
                 Text("SwiftSNES Final")
                     .font(.headline)
                     .padding(.top)
-                
+
                 if snes.isTurbo {
                     Text("TURBO ENABLED")
                         .font(.caption)
                         .bold()
                         .foregroundColor(.red)
                 }
-                
+
                 Divider()
-                
+
                 Group {
                     Text("Controls").bold()
                     HStack {
@@ -61,9 +61,9 @@ struct ContentView: View {
                         }
                     }
                 }
-                
+
                 Divider()
-                
+
                 Group {
                     Text("Debug").bold()
                     HStack {
@@ -79,9 +79,9 @@ struct ContentView: View {
                         }
                         .font(.caption)
                 }
-                
+
                 Divider()
-                
+
                 Group {
                     Text("Cheats").bold()
                     HStack {
@@ -96,9 +96,9 @@ struct ContentView: View {
                     }
                     .frame(height: 100)
                 }
-                
+
                 Spacer()
-                
+
                 HStack {
                     Button("Load ROM") { isImporting = true }
                     Button(action: { snes.reset() }) {

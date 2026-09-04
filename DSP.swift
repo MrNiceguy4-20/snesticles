@@ -1,14 +1,9 @@
 import Foundation
 
-/// Hybrid SNES DSP core
-/// - 8 voices with BRR decoding
-/// - ADSR / Gain envelopes (approximate timing)
-/// - Echo + FIR filtering
-/// - Mixed to floating-point samples via `sampleBuffer` / `flushBuffer()`
 class DSP {
     weak var apu: APU?
     var regs = [UInt8](repeating: 0, count: 128)
-    
+
     struct Voice {
         var volL: Int8 = 0; var volR: Int8 = 0
         var pitch: UInt16 = 0; var srcn: UInt8 = 0
@@ -19,41 +14,41 @@ class DSP {
         var header: UInt8 = 0; var counter: Int = 0
         var sampleOut: Int16 = 0; var on: Bool = false
     }
-    
+
     var voices = Array(repeating: Voice(), count: 8)
     var mainVolL: Int8 = 0; var mainVolR: Int8 = 0
     var echoVolL: Int8 = 0; var echoVolR: Int8 = 0
     var keyOn: UInt8 = 0; var keyOff: UInt8 = 0
     var flg: UInt8 = 0; var endx: UInt8 = 0
     var dirPage: UInt8 = 0; var index: UInt8 = 0
-    
+
     var esa: UInt8 = 0; var edl: UInt8 = 0
     var fir = [Int8](repeating: 0, count: 8)
     var echoBuffer = [Int16](repeating: 0, count: 8)
     var echoPtr: Int = 0; var feedback: Int8 = 0
     var sampleBuffer = [Float]()
-    
+
     func setAPU(_ apu: APU) { self.apu = apu }
-    
+
     func save(_ s: Serializer) {
         s.writeBytes(regs)
         s.write8(UInt8(bitPattern: mainVolL)); s.write8(UInt8(bitPattern: mainVolR))
         s.write8(UInt8(bitPattern: echoVolL)); s.write8(UInt8(bitPattern: echoVolR))
         s.write8(flg); s.write8(endx); s.write8(dirPage); s.write8(esa); s.write8(edl)
     }
-    
+
     func load(_ s: Serializer) {
         regs = s.readBytes(128)
         mainVolL = Int8(bitPattern: s.read8()); mainVolR = Int8(bitPattern: s.read8())
         echoVolL = Int8(bitPattern: s.read8()); echoVolR = Int8(bitPattern: s.read8())
         flg = s.read8(); endx = s.read8(); dirPage = s.read8(); esa = s.read8(); edl = s.read8()
     }
-    
+
     func read(_ addr: UInt8) -> UInt8 {
         if addr == 0x7C { return endx }
         return regs[Int(addr)]
     }
-    
+
     func write(_ addr: UInt8, data: UInt8) {
         regs[Int(addr)] = data
         if addr < 0x80 {
@@ -95,7 +90,7 @@ class DSP {
         default: break
         }
     }
-    
+
     func startVoice(_ v: Int) {
         voices[v].bufPos = 0
         voices[v].counter = 0
@@ -108,11 +103,11 @@ class DSP {
         }
         endx &= ~(1 << v)
     }
-    
+
     func setIndex(_ val: UInt8) { index = val }
     func writeData(_ val: UInt8) { write(index, data: val) }
     func readData() -> UInt8 { return read(index) }
-    
+
     func mix() {
         var mixL: Int32 = 0; var mixR: Int32 = 0
         var echoInL: Int32 = 0; var echoInR: Int32 = 0
@@ -141,7 +136,7 @@ class DSP {
         sampleBuffer.append(Float(mixL) / 32768.0)
         sampleBuffer.append(Float(mixR) / 32768.0)
     }
-    
+
     func processEcho(input: Int32, left: Bool) -> Int32 {
         if edl == 0 { return 0 }
         guard let apu = apu else { return 0 }
@@ -160,7 +155,7 @@ class DSP {
         let vol = left ? Int32(echoVolL) : Int32(echoVolR)
         return (firOut * vol) >> 7
     }
-    
+
     func getNextBRRSample(_ v: Int) -> Int16 {
         guard let _ = apu else { return 0 }
         if voices[v].bufPos >= 16 { decodeBRR(v); voices[v].bufPos = 0 }
@@ -168,7 +163,7 @@ class DSP {
         for i in 0..<11 { voices[v].buffer[i] = voices[v].buffer[i+1] }
         return output
     }
-    
+
     func decodeBRR(_ v: Int) {
         guard let ram = apu?.ram else { return }
         let addr = Int(voices[v].brrAddr)
@@ -192,7 +187,7 @@ class DSP {
             }
         }
     }
-    
+
     func applyBRRFilter(_ v: Int, nibble: Int16, range: UInt8, filter: UInt8) {
         var s = Int32(nibble)
         if range <= 12 { s <<= range; s >>= 1 } else { s = (s < 0) ? -2048 : 0 }
@@ -202,7 +197,7 @@ class DSP {
         s = max(-32768, min(32767, s))
         voices[v].buffer[voices[v].bufPos] = Int16(s); voices[v].bufPos += 1
     }
-    
+
     func flushBuffer() -> [Float] {
         let b = sampleBuffer; sampleBuffer.removeAll(keepingCapacity: true); return b
     }

@@ -1,39 +1,33 @@
 import Foundation
 
-// Improved DMA/HDMA controller for Phase 2
-// Includes: correct transfer modes, indirect HDMA, line-counter rules,
-// address increments, fixed-address modes, and proper register behaviors.
-
 class DMAController {
     weak var system: SNESSystem?
 
     struct Channel {
-        var params: UInt8 = 0          // $x0: control (direction, addressing mode, etc.)
-        var dest: UInt8 = 0            // $x1: destination register low byte (B-bus)
-        var srcAddr: UInt16 = 0        // $x2-$x3: A-bus source address
-        var srcBank: UInt8 = 0         // $x4: A-bus source bank
-        var count: UInt16 = 0          // $x5-$x6: transfer size (0→64K)
+        var params: UInt8 = 0
+        var dest: UInt8 = 0
+        var srcAddr: UInt16 = 0
+        var srcBank: UInt8 = 0
+        var count: UInt16 = 0
         var hdmaActive: Bool = false
         var hdmaTableAddr: UInt16 = 0
         var hdmaLineCounter: UInt8 = 0
         var hdmaDoTransfer: Bool = false
-        var indirectBank: UInt8 = 0    // $x7: indirect bank for HDMA
+        var indirectBank: UInt8 = 0
     }
 
     var channels = Array(repeating: Channel(), count: 8)
     var hdmaEnableMask: UInt8 = 0
 
-    // Reads from DMA registers (mostly open-bus in real hardware)
     func read(_ addr: UInt32) -> UInt8 { return 0 }
 
-    // Write DMA config registers
     func write(_ addr: UInt32, data: UInt8) {
         let idx = Int((addr >> 4) & 0x7)
         let reg = addr & 0xF
 
         switch reg {
-        case 0: channels[idx].params = data        // control
-        case 1: channels[idx].dest = data & 0xFF   // B-bus destination register
+        case 0: channels[idx].params = data
+        case 1: channels[idx].dest = data & 0xFF
         case 2: channels[idx].srcAddr = (channels[idx].srcAddr & 0xFF00) | UInt16(data)
         case 3: channels[idx].srcAddr = (channels[idx].srcAddr & 0x00FF) | (UInt16(data) << 8)
         case 4: channels[idx].srcBank = data
@@ -44,7 +38,6 @@ class DMAController {
         }
     }
 
-    // CPU writes $420B (DMA enable)
     func enableDMA(channels mask: UInt8, bus: Bus) {
         for i in 0..<8 {
             if (mask & (1 << i)) != 0 {
@@ -53,17 +46,16 @@ class DMAController {
         }
     }
 
-    // Perform main DMA transfer
     private func performDMATransfer(channelIdx: Int, bus: Bus) {
         let ch = channels[channelIdx]
 
         let mode = ch.params & 0x07
-        let directionCPUToPPU = (ch.params & 0x80) == 0 // bit7=0: A→B, bit7=1: B→A
-        let fixed = (ch.params & 0x08) != 0             // bit3: fixed address mode
-        let decrement = (ch.params & 0x10) != 0         // bit4: decrement instead of increment
+        let directionCPUToPPU = (ch.params & 0x80) == 0
+        let fixed = (ch.params & 0x08) != 0
+        let decrement = (ch.params & 0x10) != 0
 
         var count = Int(ch.count)
-        if count == 0 { count = 0x10000 } // 64K
+        if count == 0 { count = 0x10000 }
 
         var src = UInt32(ch.srcAddr) | (UInt32(ch.srcBank) << 16)
         var dest = UInt32(0x2100 | UInt32(ch.dest))
@@ -77,7 +69,6 @@ class DMAController {
                 bus.write(src, data: val)
             }
 
-            // Update A-bus address
             if !fixed {
                 if decrement {
                     src &-= 1
@@ -86,10 +77,9 @@ class DMAController {
                 }
             }
 
-            // Update B-bus address based on transfer mode
             switch mode {
-            case 0: break                     // write to dest
-            case 1: dest = 0x2101             // repeat
+            case 0: break
+            case 1: dest = 0x2101
             case 2: dest = 0x2102
             case 3: dest = 0x2103
             case 4: dest = 0x2104
@@ -100,17 +90,14 @@ class DMAController {
             }
         }
 
-        // Save updated addresses
         channels[channelIdx].srcAddr = UInt16(src & 0xFFFF)
         channels[channelIdx].count = 0
     }
 
-    // CPU writes $420C (HDMA enable)
     func enableHDMA(channels mask: UInt8) {
         hdmaEnableMask = mask
     }
 
-    // Called once per frame before line 0
     func resetHDMA(bus: Bus) {
         for i in 0..<8 {
             if (hdmaEnableMask & (1 << i)) != 0 {
@@ -124,7 +111,6 @@ class DMAController {
         }
     }
 
-    // HDMA per-scanline execution
     func executeHDMA(line: Int, bus: Bus) {
         for i in 0..<8 {
             if !channels[i].hdmaActive { continue }
@@ -132,7 +118,7 @@ class DMAController {
             var ch = channels[i]
 
             if ch.hdmaLineCounter == 0 {
-                // Fetch header byte
+
                 let table = UInt32(ch.hdmaTableAddr) | (UInt32(ch.srcBank) << 16)
                 let header = bus.read(table)
                 ch.hdmaTableAddr &+= 1
@@ -146,7 +132,6 @@ class DMAController {
                 ch.hdmaLineCounter = header & 0x7F
                 ch.hdmaDoTransfer = (header & 0x80) != 0
 
-                // If using indirect mode
                 if (ch.params & 0x40) != 0 {
                     let lo = bus.read(UInt32(ch.hdmaTableAddr) | (UInt32(ch.srcBank) << 16))
                     let hi = bus.read(UInt32(ch.hdmaTableAddr + 1) | (UInt32(ch.srcBank) << 16))

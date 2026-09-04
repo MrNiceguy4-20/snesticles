@@ -9,7 +9,7 @@ struct MetalView: NSViewRepresentable {
         v.delegate = renderer
         v.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         v.framebufferOnly = false
-        // Drive rendering via setNeedsDisplay or continuous redraw
+
         v.enableSetNeedsDisplay = true
         v.isPaused = false
         v.preferredFramesPerSecond = 60
@@ -49,8 +49,7 @@ class MetalRenderer: NSObject, MTKViewDelegate {
     }
     func updateTexture(pixels: [UInt32]) {
         guard !pixels.isEmpty else { return }
-        // Convert from ARGB (0xAARRGGBB) used by the PPU into BGRA layout
-        // expected by a .bgra8Unorm Metal texture.
+
         var bgraPixels = [UInt32](repeating: 0, count: pixels.count)
         for i in 0..<pixels.count {
             let px = pixels[i]
